@@ -5,6 +5,32 @@ export type PeerControl =
   | "video-decline"
   | "video-end";
 
+const PEER_CONTROLS: readonly PeerControl[] = [
+  "video-request",
+  "video-accept",
+  "video-decline",
+  "video-end",
+];
+
+// Wire format for the chat data channel. A discriminated union on `t` keeps the
+// send and receive halves in sync — a wrong tag is a compile error, not a
+// silently dropped message.
+type WireMessage =
+  | { t: "chat"; text: string }
+  | { t: "ctrl"; ctrl: PeerControl };
+
+function parseWireMessage(data: unknown): WireMessage | null {
+  if (typeof data !== "object" || data === null) return null;
+  const msg = data as Record<string, unknown>;
+  if (msg.t === "chat" && typeof msg.text === "string") {
+    return { t: "chat", text: msg.text };
+  }
+  if (msg.t === "ctrl" && PEER_CONTROLS.includes(msg.ctrl as PeerControl)) {
+    return { t: "ctrl", ctrl: msg.ctrl as PeerControl };
+  }
+  return null;
+}
+
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;
   onChat: (text: string) => void;
@@ -74,14 +100,16 @@ export class PeerSession {
   private wireDataChannel(dc: RTCDataChannel) {
     dc.onopen = () => this.cb.onChannelOpen();
     dc.onmessage = (e) => {
+      let data: unknown;
       try {
-        const msg = JSON.parse(e.data as string);
-        if (msg.t === "chat" && typeof msg.text === "string") {
-          this.cb.onChat(msg.text);
-        } else if (msg.t === "ctrl" && typeof msg.ctrl === "string") {
-          this.cb.onControl(msg.ctrl as PeerControl);
-        }
-      } catch {}
+        data = JSON.parse(e.data as string);
+      } catch {
+        return;
+      }
+      const msg = parseWireMessage(data);
+      if (!msg) return;
+      if (msg.t === "chat") this.cb.onChat(msg.text);
+      else this.cb.onControl(msg.ctrl);
     };
   }
 
@@ -109,6 +137,9 @@ export class PeerSession {
 
     await this.flushPendingCandidates();
     await this.pc.setRemoteDescription(desc);
+    // ICE candidates that were buffered while the remote description was still
+    // being applied (same poll batch as this offer/answer) can be added now.
+    await this.flushPendingCandidates();
     if (desc.type === "offer") {
       await this.pc.setLocalDescription();
       if (this.pc.localDescription) {
@@ -129,16 +160,16 @@ export class PeerSession {
   }
 
   sendChat(text: string) {
-    this.safeSend({ t: "msg", text });
+    this.safeSend({ t: "chat", text });
   }
 
   sendControl(ctrl: PeerControl) {
     this.safeSend({ t: "ctrl", ctrl });
   }
 
-  private safeSend(obj: unknown) {
+  private safeSend(msg: WireMessage) {
     if (this.dc && this.dc.readyState === "open") {
-      this.dc.send(JSON.stringify(obj));
+      this.dc.send(JSON.stringify(msg));
     }
   }
 

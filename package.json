@@ -5,10 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "npx prisma generate && next build",
+    "postinstall": "prisma generate",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@neon/config": "^1.8.4",
+    "@neon/env": "^1.5.1",
     "@prisma/adapter-pg": "^7.8.0",
     "@prisma/client": "^7.8.0",
     "mapbox-gl": "^3.24.0",
