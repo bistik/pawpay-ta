@@ -16,6 +16,7 @@ model Presence {
   lat      Float // ALREADY privacy-offset coords (raw is never stored)
   lng      Float
   busy     Boolean  @default(false) // true while in an active connection
+  token    String? // per-session bearer token; proves ownership of `id`
   lastSeen DateTime
 
   @@index([lastSeen])
@@ -23,12 +24,24 @@ model Presence {
 
 model Signal {
   // Mailbox for connection requests + WebRTC signaling only.
-  id        String   @id @default(uuid())
-  toId      String // recipient session id
-  fromId    String // sender session id
-  type      String // request | accept | decline | offer | answer | ice | end
-  payload   String? // JSON string (SDP / ICE candidate)
-  createdAt DateTime @default(now())
+  id          String    @id @default(uuid())
+  toId        String // recipient session id
+  fromId      String // sender session id
+  type        String // request | accept | decline | offer | answer | ice | end
+  payload     String? // JSON string (SDP / ICE candidate)
+  createdAt   DateTime  @default(now())
+  deliveredAt DateTime? // set when the recipient's poll hands the row over
 
-  @@index([toId])
+  @@index([toId, deliveredAt])
+  @@index([fromId, toId])
+}
+
+// Fixed-window rate-limit counters. Shared across serverless instances (unlike
+// an in-process Map), keyed by client IP or by authenticated session id.
+model RateLimit {
+  key         String   @id
+  windowStart DateTime
+  count       Int
+
+  @@index([windowStart])
 }

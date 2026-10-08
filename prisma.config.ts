@@ -15,7 +15,10 @@ export default defineConfig({
   migrations: {
     path: path.join("prisma", "migrations"),
   },
+  // Migrate/introspection need a direct (non-pooler) connection — PgBouncer
+  // can't hold the session state and advisory locks they take. The app runtime
+  // keeps using the pooled DATABASE_URL (lib/prisma.ts).
   datasource: {
-    url: env("DATABASE_URL"),
+    url: process.env.DATABASE_URL_UNPOOLED ?? env("DATABASE_URL"),
   },
 });
