@@ -1,8 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { peerColor, peerGlow } from "@/lib/peer-color";
+import { pickIcebreaker, QUICK_REPLIES } from "@/lib/icebreakers";
+import type { LinkMatch } from "@/lib/links";
+import MessageText from "./MessageText";
+import LinkPrompt from "./LinkPrompt";
+import SecureBadge from "./SecureBadge";
 
 export interface ChatMessage {
   id: number;
@@ -29,30 +34,37 @@ export default function ChatPanel({
   videoBusy,
   peerId,
   peerTyping,
+  secureCode,
   onSend,
   onTyping,
   onStartVideo,
   onEnd,
+  onRequestReport,
 }: {
   messages: ChatMessage[];
   connected: boolean;
   videoBusy: boolean;
   peerId: string | null;
   peerTyping: boolean;
+  secureCode: string | null;
   onSend: (text: string) => void;
   onTyping: () => void;
   onStartVideo: () => void;
   onEnd: () => void;
+  onRequestReport: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [expanded, setExpanded] = useState(true);
   const [pinned, setPinned] = useState(true);
   const [unread, setUnread] = useState(0);
+  const [pendingLink, setPendingLink] = useState<LinkMatch | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   // Read in effects/scroll handlers without making them reactive.
   const pinnedRef = useRef(true);
 
   const peerKey = peerId ?? "stranger";
+  const icebreaker = useMemo(() => pickIcebreaker(peerKey), [peerKey]);
   const peerVars = {
     "--dot": peerColor(peerKey),
     "--dot-glow": peerGlow(peerKey),
@@ -136,7 +148,7 @@ export default function ChatPanel({
         />
         <div className="min-w-0 flex-1">
           <p className="truncate font-semibold tracking-tight">Stranger</p>
-          <p className="flex items-center gap-1.5 text-xs text-fg-faint">
+          <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-fg-faint">
             <span
               aria-hidden="true"
               className={`h-1.5 w-1.5 rounded-full ${
@@ -146,6 +158,7 @@ export default function ChatPanel({
               }`}
             />
             {connected ? "Connected" : "Connecting…"}
+            {connected && <SecureBadge code={secureCode} />}
           </p>
         </div>
         <div className="flex shrink-0 gap-2">
@@ -155,6 +168,15 @@ export default function ChatPanel({
             className="rounded-full border border-line-strong px-3 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:border-fg-faint hover:text-fg disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-fg-muted"
           >
             Video
+          </button>
+          <button
+            onClick={onRequestReport}
+            disabled={!connected}
+            aria-label="Report this stranger"
+            title="Report"
+            className="rounded-full border border-line-strong px-2.5 py-1.5 text-sm font-medium text-fg-muted transition-colors hover:border-danger hover:text-danger disabled:opacity-40 disabled:hover:border-line-strong disabled:hover:text-fg-muted"
+          >
+            <span aria-hidden="true">⚑</span>
           </button>
           <button
             onClick={onEnd}
@@ -174,9 +196,14 @@ export default function ChatPanel({
         className="scroll-slim flex flex-1 flex-col gap-1 overflow-y-auto px-4 py-3"
       >
         {messages.length === 0 && (
-          <p className="mt-8 text-center text-sm leading-relaxed text-fg-faint">
-            Say hello. Messages go peer-to-peer and are never stored.
-          </p>
+          <div className="mt-8 flex flex-col items-center gap-2 px-4 text-center">
+            <p className="text-pretty text-sm leading-relaxed text-fg-muted">
+              {icebreaker}
+            </p>
+            <p className="text-xs leading-relaxed text-fg-faint">
+              Messages go peer-to-peer and are never stored.
+            </p>
+          </div>
         )}
 
         {messages.map((m, i) => {
@@ -200,7 +227,7 @@ export default function ChatPanel({
                   startsGroup ? "" : m.mine ? "rounded-tr-md" : "rounded-tl-md"
                 }`}
               >
-                {m.text}
+                <MessageText text={m.text} onLinkClick={setPendingLink} />
               </span>
               {endsGroup && (
                 <span className="mt-1 px-1 font-mono text-xs text-fg-faint tabular-nums">
@@ -242,29 +269,54 @@ export default function ChatPanel({
         )}
       </div>
 
-      <form
-        onSubmit={submit}
-        className="flex gap-2 border-t border-line px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-      >
-        <input
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            if (e.target.value) onTyping();
-          }}
-          placeholder={connected ? "Type a message…" : "Connecting…"}
-          aria-label="Message"
-          disabled={!connected}
-          className="flex-1 rounded-full bg-surface px-4 py-2 text-base placeholder:text-fg-faint disabled:opacity-50 sm:text-sm"
-        />
-        <button
-          type="submit"
-          disabled={!connected || !draft.trim()}
-          className="shrink-0 rounded-full bg-signal px-4 py-2 text-sm font-semibold text-signal-ink transition-colors hover:bg-signal-hi disabled:opacity-40 disabled:hover:bg-signal"
+      <div className="border-t border-line">
+        {connected && (
+          <div className="scroll-slim flex gap-2 overflow-x-auto px-3 pt-3">
+            {QUICK_REPLIES.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => {
+                  setDraft(q);
+                  inputRef.current?.focus();
+                }}
+                className="shrink-0 rounded-full border border-line-strong bg-surface px-3 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:border-fg-faint hover:text-fg"
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <form
+          onSubmit={submit}
+          className="flex gap-2 px-3 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
         >
-          Send
-        </button>
-      </form>
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              if (e.target.value) onTyping();
+            }}
+            placeholder={connected ? "Type a message…" : "Connecting…"}
+            aria-label="Message"
+            disabled={!connected}
+            className="flex-1 rounded-full bg-surface px-4 py-2 text-base placeholder:text-fg-faint disabled:opacity-50 sm:text-sm"
+          />
+          <button
+            type="submit"
+            disabled={!connected || !draft.trim()}
+            className="shrink-0 rounded-full bg-signal px-4 py-2 text-sm font-semibold text-signal-ink transition-colors hover:bg-signal-hi disabled:opacity-40 disabled:hover:bg-signal"
+          >
+            Send
+          </button>
+        </form>
+      </div>
+
+      {pendingLink && (
+        <LinkPrompt link={pendingLink} onClose={() => setPendingLink(null)} />
+      )}
     </div>
   );
 }

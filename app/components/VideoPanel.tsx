@@ -1,15 +1,20 @@
 "use client";
 
 import { useEffect, useRef } from "react";
+import SecureBadge from "./SecureBadge";
 
 export default function VideoPanel({
   localStream,
   remoteStream,
+  secureCode,
   onEnd,
+  onRequestReport,
 }: {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+  secureCode: string | null;
   onEnd: () => void;
+  onRequestReport: () => void;
 }) {
   const localRef = useRef<HTMLVideoElement>(null);
   const remoteRef = useRef<HTMLVideoElement>(null);
@@ -53,8 +58,19 @@ export default function VideoPanel({
           aria-label="Your video"
           className="absolute bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 h-40 w-28 -scale-x-100 rounded-xl border border-line-strong bg-surface object-cover shadow-xl"
         />
+        {secureCode && (
+          <div className="absolute left-4 top-[calc(env(safe-area-inset-top)+1rem)]">
+            <SecureBadge code={secureCode} />
+          </div>
+        )}
       </div>
-      <div className="flex justify-center px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="flex items-center justify-center gap-3 px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <button
+          onClick={onRequestReport}
+          className="rounded-full border border-line-strong px-5 py-3 font-semibold text-fg-muted transition-colors hover:border-danger hover:text-danger"
+        >
+          Report
+        </button>
         <button
           onClick={onEnd}
           className="rounded-full bg-danger px-8 py-3 font-semibold text-white transition-colors hover:bg-danger-hi"

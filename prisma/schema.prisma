@@ -45,3 +45,14 @@ model RateLimit {
 
   @@index([windowStart])
 }
+
+// Anonymous abuse tally. Intentionally identity-free: no reporter/reported
+// session, no content, no IP — just when and why a report was filed, so the
+// operator has a signal without breaking the "nothing stored" promise.
+model Report {
+  id        String   @id @default(uuid())
+  reason    String
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

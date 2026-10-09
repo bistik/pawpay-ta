@@ -21,6 +21,18 @@ export const SIGNAL_TYPES = [
 
 export type SignalType = (typeof SIGNAL_TYPES)[number];
 
+// Reasons a user can attach to a report. Runtime tuple is the single source of
+// truth: the type derives from it and the zod schema reuses it, so a reason
+// can't be added in one place and forgotten in the other.
+export const REPORT_REASONS = [
+  "harassment",
+  "sexual",
+  "spam",
+  "other",
+] as const;
+
+export type ReportReason = (typeof REPORT_REASONS)[number];
+
 // Signals whose payload carries an SDP description or ICE candidate.
 export const PAYLOAD_SIGNAL_TYPES = ["offer", "answer", "ice"] as const;
 

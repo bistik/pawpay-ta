@@ -1,5 +1,5 @@
 // Client-side helpers for talking to the coordination API.
-import type { PollResponse, SignalType } from "@/lib/types";
+import type { PollResponse, ReportReason, SignalType } from "@/lib/types";
 import { SESSION_TOKEN_HEADER } from "@/lib/types";
 
 // The session token lives here rather than at every call site: `join` stores
@@ -73,4 +73,16 @@ export function leave(id: string): void {
       keepalive: true,
     });
   }
+}
+
+// File an anonymous abuse report. No peer id or content is sent — only the
+// caller's own session (which the server uses to authorize, then discards) and
+// the picked reason. Fire-and-forget; the caller disconnects regardless.
+export function reportPeer(fromId: string, reason: ReportReason): void {
+  void fetch("/api/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...tokenHeaders() },
+    body: JSON.stringify({ fromId, reason }),
+    keepalive: true,
+  });
 }

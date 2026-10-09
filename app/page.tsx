@@ -6,10 +6,12 @@ import WorldMap from "./components/WorldMap";
 import ConnectionPrompt from "./components/ConnectionPrompt";
 import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
-import { join, leave, poll, sendSignal } from "@/lib/api";
+import ReportPrompt from "./components/ReportPrompt";
+import { join, leave, poll, reportPeer, sendSignal } from "@/lib/api";
 import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
-import { type PeerDot, type SignalMsg } from "@/lib/types";
+import { censorText } from "@/lib/moderation";
+import { type PeerDot, type ReportReason, type SignalMsg } from "@/lib/types";
 
 type Conn =
   | { kind: "idle" }
@@ -49,9 +51,14 @@ export default function Home() {
   };
 
   const [peerTyping, setPeerTyping] = useState(false);
+  const [secureCode, setSecureCode] = useState<string | null>(null);
+  const [reporting, setReporting] = useState(false);
 
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
+  // Peers we've reported this session — a report shouldn't be a formality, so
+  // we refuse to reconnect with them while the tab lives.
+  const reportedRef = useRef<Set<string>>(new Set());
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastTypingSent = useRef(0);
@@ -95,6 +102,8 @@ export default function Home() {
     peerRef.current = null;
     setLocalStream(null);
     setRemoteStream(null);
+    setSecureCode(null);
+    setReporting(false);
     setVideo("none");
     setMessages([]);
     setConn({ kind: "idle" });
@@ -108,10 +117,11 @@ export default function Home() {
       },
       onChat: (text) => {
         stopPeerTyping();
-        addMessage(false, text);
+        addMessage(false, censorText(text).text);
       },
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
+      onSecureCode: (code) => setSecureCode(code),
       onConnectionState: (state) => {
         if (state === "failed") {
           teardown("Connection failed (network).");
@@ -206,6 +216,19 @@ export default function Home() {
     teardown();
   }
 
+  // Report and hard-disconnect in one move: the peer gets the same `end` a
+  // normal hang-up sends (so their screen clears too), we remember them for the
+  // rest of the session, and an anonymous tally is filed.
+  function reportAndLeave(reason: ReportReason) {
+    const c = connRef.current;
+    if (c.kind === "connecting" || c.kind === "connected") {
+      void sendSignal(sessionId, c.peerId, "end");
+      reportedRef.current.add(c.peerId);
+    }
+    reportPeer(sessionId, reason);
+    teardown("Reported. You're disconnected.");
+  }
+
   function startVideoRequest() {
     if (videoRef.current !== "none" || !peerRef.current) return;
     setVideo("requesting");
@@ -245,10 +268,13 @@ export default function Home() {
   function processSignal(sig: SignalMsg) {
     switch (sig.type) {
       case "request": {
-        if (connRef.current.kind === "idle") {
-          setConn({ kind: "incoming", peerId: sig.fromId });
-        } else {
+        if (
+          connRef.current.kind !== "idle" ||
+          reportedRef.current.has(sig.fromId)
+        ) {
           void sendSignal(sessionId, sig.fromId, "decline");
+        } else {
+          setConn({ kind: "incoming", peerId: sig.fromId });
         }
         break;
       }
@@ -400,13 +426,16 @@ export default function Home() {
           videoBusy={video !== "none"}
           peerId={chatPeerId}
           peerTyping={peerTyping}
+          secureCode={secureCode}
           onSend={(text) => {
-            peerRef.current?.sendChat(text);
-            addMessage(true, text);
+            const { text: safe } = censorText(text);
+            peerRef.current?.sendChat(safe);
+            addMessage(true, safe);
           }}
           onTyping={sendTyping}
           onStartVideo={startVideoRequest}
           onEnd={endConnection}
+          onRequestReport={() => setReporting(true)}
         />
       )}
 
@@ -435,7 +464,16 @@ export default function Home() {
         <VideoPanel
           localStream={localStream}
           remoteStream={remoteStream}
+          secureCode={secureCode}
           onEnd={endVideo}
+          onRequestReport={() => setReporting(true)}
+        />
+      )}
+
+      {reporting && (
+        <ReportPrompt
+          onConfirm={reportAndLeave}
+          onCancel={() => setReporting(false)}
         />
       )}
     </main>

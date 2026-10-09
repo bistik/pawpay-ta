@@ -18,6 +18,8 @@ export const RATE_LIMITS = {
   pollPerIp: { limit: 600, windowMs: 60_000 },
   leavePerSession: { limit: 30, windowMs: 60_000 },
   leavePerIp: { limit: 60, windowMs: 60_000 },
+  reportPerSession: { limit: 10, windowMs: 60_000 },
+  reportPerIp: { limit: 30, windowMs: 60_000 },
 } as const;
 
 // Keep counters around a little longer than the widest window so the prune in

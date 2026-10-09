@@ -106,4 +106,42 @@ accept → busy flow, and 150 polls allowed before 429.
 
 ## Phase 4 — Make it better
 
-TBD.
+**"Safer strangers."** Pulse pairs you with a random stranger on video, so its
+real risk is abuse, not missing features. This slice makes a connection
+accountable and self-defending *without* breaking the privacy promise (no
+accounts, nothing stored). Five pieces, all **outside the WebRTC wire format** —
+no `WireMessage`/`PeerControl` changes, so the P2P core is untouched.
+
+- **Profanity masking** (`lib/moderation.ts`). Masked **on send and on render**:
+  the wire never carries the raw word, and a patched client can't unmask it.
+  Whole-word matching over a folded form (leet `4/@/3/1/0/$/5/7`, accents,
+  `fuuuck → fuck`); substrings are never matched, so Scunthorpe / "assassin" /
+  "classic" survive. A speed bump, not a wall.
+- **Link safety** (`lib/links.ts`, `MessageText`, `LinkPrompt`). URLs are never
+  auto-linked — they render as buttons that open a confirm dialog showing the
+  host first, with raw-IP and punycode hosts flagged. Only `http(s)://`/`www.`
+  match, so "e.g." isn't a link.
+- **Secure-channel badge** (`lib/secure-code.ts`). Both peers sort the two DTLS
+  fingerprints from their SDP, SHA-256 them, and render 4 emoji — identical on
+  both screens unless a relay rewrote the fingerprints. Catches an active MITM,
+  but only pays off if the two humans compare it (and a short code is grindable).
+- **Report & eject** (`app/api/report`, `ReportPrompt`). Pick a reason → instant
+  disconnect, the peer gets the normal `end`, and re-requests are auto-declined
+  for the session. The tally stores **only `{ id, reason, createdAt }`** — no
+  session ids, content, or IP. Anonymous telemetry, not enforcement: the server
+  can't identify an anonymous P2P peer, and it doesn't pretend otherwise.
+- **Icebreakers + quick replies** (`lib/icebreakers.ts`). A per-peer opening
+  prompt and chips that insert into the draft (a suggestion, never an auto-send).
+
+**Shape.** The report route mirrors `signal`/`leave` (IP limit → zod strictObject
+→ session-token auth → per-session limit); `Report` is an additive migration the
+build applies via `prisma migrate deploy`.
+
+**Verified.** `tsc`, `eslint`, `next build` clean (build applied the migration
+and compiled `/api/report`). A 24-case scratch suite covers moderation (leet,
+spaced letters, idempotency, the Scunthorpe guard), link grading, and SAS
+determinism. Live probes: 415 without JSON, 400 bad body/reason, 401 bad token.
+
+**Next.** GIF/sticker search (provider + IP-leak note), background blur and ML
+noise cancellation (seam is `PeerSession.startVideo`), emoji reactions (needs wire
+message ids), and a `Report` retention prune.

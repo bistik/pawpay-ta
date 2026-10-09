@@ -7,7 +7,11 @@
 // with `crypto.randomUUID()` — pinning the format stops a caller from choosing
 // arbitrary, guessable, or oversized ids.
 import { z } from "zod";
-import { PAYLOAD_SIGNAL_TYPES, SIGNAL_TYPES } from "@/lib/types";
+import {
+  PAYLOAD_SIGNAL_TYPES,
+  REPORT_REASONS,
+  SIGNAL_TYPES,
+} from "@/lib/types";
 
 // SDP/ICE blobs are small; cap the payload so a peer can't stuff the mailbox
 // with megabytes per message.
@@ -72,5 +76,13 @@ export const pollQuerySchema = z.object({
   id: sessionId,
 });
 
+// POST /api/report — an anonymous abuse tally. `fromId` only proves the caller
+// owns a live session; it is never stored. No peer id, no content, no IP.
+export const reportBodySchema = z.strictObject({
+  fromId: sessionId,
+  reason: z.enum(REPORT_REASONS),
+});
+
 export type JoinBody = z.infer<typeof joinBodySchema>;
 export type SignalBody = z.infer<typeof signalBodySchema>;
+export type ReportBody = z.infer<typeof reportBodySchema>;

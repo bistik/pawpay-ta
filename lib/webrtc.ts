@@ -1,3 +1,5 @@
+import { deriveSecureCode } from "@/lib/secure-code";
+
 export type DescType = "offer" | "answer" | "ice";
 export type PeerControl =
   | "video-request"
@@ -40,6 +42,9 @@ interface PeerCallbacks {
   onRemoteStream: (stream: MediaStream | null) => void;
   onConnectionState: (state: RTCPeerConnectionState) => void;
   onChannelOpen: () => void;
+  // Short authentication string, derived once both SDPs have arrived. Null when
+  // it can't be computed (missing fingerprint, non-secure context).
+  onSecureCode: (code: string | null) => void;
 }
 
 const ICE_CONFIG: RTCConfiguration = {
@@ -56,6 +61,7 @@ export class PeerSession {
   private closed = false;
   private readonly cb: PeerCallbacks;
   private pendingCandidates: RTCIceCandidateInit[] = [];
+  private secureEmitted = false;
 
   constructor(initiator: boolean, cb: PeerCallbacks) {
     this.cb = cb;
@@ -147,6 +153,24 @@ export class PeerSession {
       if (this.pc.localDescription) {
         this.cb.onSignal("answer", JSON.stringify(this.pc.localDescription));
       }
+    }
+
+    // Both SDPs now exist on either path (initiator on answer, answerer on
+    // offer), so this is the single moment the session code can be derived.
+    void this.maybeEmitSecureCode();
+  }
+
+  private async maybeEmitSecureCode() {
+    if (this.secureEmitted || this.closed) return;
+    const local = this.pc.localDescription?.sdp;
+    const remote = this.pc.remoteDescription?.sdp;
+    if (!local || !remote) return;
+    this.secureEmitted = true;
+    try {
+      const code = await deriveSecureCode(local, remote);
+      if (!this.closed) this.cb.onSecureCode(code);
+    } catch {
+      if (!this.closed) this.cb.onSecureCode(null);
     }
   }
 
