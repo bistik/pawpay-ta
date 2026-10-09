@@ -39,14 +39,14 @@ export default function VideoPanel({
 
   return (
     <div className="absolute inset-0 z-30 flex flex-col bg-void">
-      <div className="relative flex-1">
+      <div className="relative min-h-0 flex-1">
         {/* Remote (full screen) */}
         <video
           ref={remoteRef}
           autoPlay
           playsInline
           aria-label="Stranger's video"
-          className="h-full w-full bg-abyss object-cover"
+          className="absolute inset-0 h-full w-full bg-abyss object-cover"
         />
         {!remoteStream && (
           <div className="absolute inset-0 flex items-center justify-center">
@@ -70,7 +70,7 @@ export default function VideoPanel({
           </div>
         )}
       </div>
-      <div className="flex items-center justify-center gap-3 px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <div className="flex shrink-0 items-center justify-center gap-3 px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <button
           onClick={onRequestReport}
           className="rounded-full border border-line-strong px-5 py-3 font-semibold text-fg-muted transition-colors hover:border-danger hover:text-danger"

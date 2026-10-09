@@ -186,11 +186,14 @@ export class BackgroundBlur {
     if (!ctx) return;
     const image = ctx.createImageData(mw, mh);
     for (let i = 0; i < mw * mh; i++) {
-      // Any non-zero category is the person; 0 is background.
+      // The shipped selfie model's category mask marks the *background* with a
+      // non-zero category and the person with 0 — the opposite of the docs'
+      // "background 0 / person 1". Verified against the pinned model, so keep
+      // the person (the zero pixel) opaque and let the background show through.
       image.data[i * 4] = 255;
       image.data[i * 4 + 1] = 255;
       image.data[i * 4 + 2] = 255;
-      image.data[i * 4 + 3] = data[i] ? 255 : 0;
+      image.data[i * 4 + 3] = data[i] ? 0 : 255;
     }
     ctx.putImageData(image, 0, 0);
   }
