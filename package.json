@@ -5,11 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "npx prisma generate && npx prisma migrate deploy && next build",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/setup-mediapipe.mjs",
     "start": "next start",
     "lint": "eslint"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^0.10.14",
     "@neon/config": "^1.8.4",
     "@neon/env": "^1.5.1",
     "@prisma/adapter-pg": "^7.8.0",

@@ -4,13 +4,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { peerColor, peerGlow } from "@/lib/peer-color";
 import { pickIcebreaker, QUICK_REPLIES } from "@/lib/icebreakers";
+import {
+  REACTION_EMOJI,
+  type ReactionEmoji,
+  type ReactionMap,
+} from "@/lib/webrtc";
 import type { LinkMatch } from "@/lib/links";
 import MessageText from "./MessageText";
 import LinkPrompt from "./LinkPrompt";
 import SecureBadge from "./SecureBadge";
 
 export interface ChatMessage {
-  id: number;
+  id: string;
   mine: boolean;
   text: string;
   at: number;
@@ -30,24 +35,28 @@ function timeLabel(at: number): string {
 
 export default function ChatPanel({
   messages,
+  reactions,
   connected,
   videoBusy,
   peerId,
   peerTyping,
   secureCode,
   onSend,
+  onReact,
   onTyping,
   onStartVideo,
   onEnd,
   onRequestReport,
 }: {
   messages: ChatMessage[];
+  reactions: Record<string, ReactionMap>;
   connected: boolean;
   videoBusy: boolean;
   peerId: string | null;
   peerTyping: boolean;
   secureCode: string | null;
   onSend: (text: string) => void;
+  onReact: (id: string, emoji: ReactionEmoji) => void;
   onTyping: () => void;
   onStartVideo: () => void;
   onEnd: () => void;
@@ -58,6 +67,8 @@ export default function ChatPanel({
   const [pinned, setPinned] = useState(true);
   const [unread, setUnread] = useState(0);
   const [pendingLink, setPendingLink] = useState<LinkMatch | null>(null);
+  // Which message's reaction tray is open (one at a time, or null).
+  const [reactionTray, setReactionTray] = useState<string | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Read in effects/scroll handlers without making them reactive.
@@ -213,22 +224,98 @@ export default function ChatPanel({
             !prev || prev.mine !== m.mine || m.at - prev.at > GROUP_WINDOW_MS;
           const endsGroup =
             !next || next.mine !== m.mine || next.at - m.at > GROUP_WINDOW_MS;
+          const rx = reactions[m.id];
+          const active = rx ? REACTION_EMOJI.filter((e) => rx[e]) : [];
           return (
             <div
               key={m.id}
-              className={`bubble-in flex flex-col ${m.mine ? "items-end" : "items-start"} ${
-                startsGroup ? "mt-2" : ""
-              }`}
+              className={`bubble-in group flex flex-col ${
+                m.mine ? "items-end" : "items-start"
+              } ${startsGroup ? "mt-2" : ""}`}
             >
-              <span
-                className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap ${
-                  m.mine ? "bg-signal text-signal-ink" : "bg-surface-2 text-fg"
-                } ${endsGroup ? (m.mine ? "rounded-br-md" : "rounded-bl-md") : ""} ${
-                  startsGroup ? "" : m.mine ? "rounded-tr-md" : "rounded-tl-md"
+              <div
+                className={`flex max-w-full items-center gap-1 ${
+                  m.mine ? "flex-row-reverse" : "flex-row"
                 }`}
               >
-                <MessageText text={m.text} onLinkClick={setPendingLink} />
-              </span>
+                <span
+                  className={`max-w-[80%] rounded-2xl px-3.5 py-2 text-sm leading-relaxed break-words whitespace-pre-wrap ${
+                    m.mine ? "bg-signal text-signal-ink" : "bg-surface-2 text-fg"
+                  } ${endsGroup ? (m.mine ? "rounded-br-md" : "rounded-bl-md") : ""} ${
+                    startsGroup ? "" : m.mine ? "rounded-tr-md" : "rounded-tl-md"
+                  }`}
+                >
+                  <MessageText text={m.text} onLinkClick={setPendingLink} />
+                </span>
+                <div className="relative shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setReactionTray(reactionTray === m.id ? null : m.id)
+                    }
+                    aria-label="Add reaction"
+                    aria-expanded={reactionTray === m.id}
+                    className="flex h-7 w-7 items-center justify-center rounded-full border border-line-strong bg-surface text-sm transition-opacity hover:border-fg-faint sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100"
+                  >
+                    <span aria-hidden="true">🙂</span>
+                  </button>
+                  {reactionTray === m.id && (
+                    <div
+                      className={`absolute top-full z-20 mt-1 flex gap-0.5 rounded-full border border-line-strong bg-surface px-1.5 py-1 shadow-lg ${
+                        m.mine ? "right-0" : "left-0"
+                      }`}
+                    >
+                      {REACTION_EMOJI.map((e) => (
+                        <button
+                          key={e}
+                          type="button"
+                          onClick={() => {
+                            onReact(m.id, e);
+                            setReactionTray(null);
+                          }}
+                          aria-label={`React with ${e}`}
+                          className="rounded-full px-1 text-lg leading-none transition-transform hover:scale-125"
+                        >
+                          <span aria-hidden="true">{e}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {active.length > 0 && (
+                <div
+                  className={`mt-1 flex flex-wrap gap-1 ${
+                    m.mine ? "justify-end" : "justify-start"
+                  }`}
+                >
+                  {active.map((e) => {
+                    const r = rx![e]!;
+                    const count = (r.me ? 1 : 0) + (r.them ? 1 : 0);
+                    return (
+                      <button
+                        key={e}
+                        type="button"
+                        onClick={() => onReact(m.id, e)}
+                        aria-pressed={r.me}
+                        aria-label={`${e} reaction${count > 1 ? ` (${count})` : ""}`}
+                        className={`flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors ${
+                          r.me
+                            ? "border-signal bg-signal/15 text-fg"
+                            : "border-line-strong bg-surface text-fg-muted hover:border-fg-faint"
+                        }`}
+                      >
+                        <span aria-hidden="true">{e}</span>
+                        {count > 1 && (
+                          <span className="font-mono tabular-nums">{count}</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               {endsGroup && (
                 <span className="mt-1 px-1 font-mono text-xs text-fg-faint tabular-nums">
                   {timeLabel(m.at)}

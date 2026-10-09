@@ -106,11 +106,10 @@ accept → busy flow, and 150 polls allowed before 429.
 
 ## Phase 4 — Make it better
 
-**"Safer strangers."** Pulse pairs you with a random stranger on video, so its
-real risk is abuse, not missing features. This slice makes a connection
-accountable and self-defending *without* breaking the privacy promise (no
-accounts, nothing stored). Five pieces, all **outside the WebRTC wire format** —
-no `WireMessage`/`PeerControl` changes, so the P2P core is untouched.
+**"Safer strangers."** Pulse pairs strangers on video, so its real risk is abuse,
+not missing features. These slices make a connection accountable and self-defending
+*without* breaking the privacy promise (no accounts, nothing stored) — mostly
+**outside the WebRTC wire format**, with reactions the one additive exception.
 
 - **Profanity masking** (`lib/moderation.ts`). Masked **on send and on render**:
   the wire never carries the raw word, and a patched client can't unmask it.
@@ -132,16 +131,24 @@ no `WireMessage`/`PeerControl` changes, so the P2P core is untouched.
   can't identify an anonymous P2P peer, and it doesn't pretend otherwise.
 - **Icebreakers + quick replies** (`lib/icebreakers.ts`). A per-peer opening
   prompt and chips that insert into the draft (a suggestion, never an auto-send).
+- **Emoji reactions** (`lib/webrtc.ts`, `ChatPanel`). Chat ids were a local counter,
+  so a peer had nothing to point at — `chat` now carries a shared `id`, and a new
+  `react` message (`{ to, emoji, op }`) targets a fixed 6-emoji whitelist validated
+  on receive. Chips show a count and highlight yours; a hover/tap tray adds one.
+  Whitelisted, so they bypass the profanity mask and the link path.
+- **Background blur** (`lib/background-blur.ts`, `PeerSession.setBlur`). Camera →
+  MediaPipe Selfie Segmentation → a downscale/upscale-blurred frame composited under
+  a mask cut-out of the person, published via `sender.replaceTrack`; the `Blur` toggle
+  swaps tracks and the self-view mirrors it. Wasm + model are self-hosted (generated
+  at install by `scripts/setup-mediapipe.mjs`), so video never leaves the device.
 
 **Shape.** The report route mirrors `signal`/`leave` (IP limit → zod strictObject
 → session-token auth → per-session limit); `Report` is an additive migration the
 build applies via `prisma migrate deploy`.
 
-**Verified.** `tsc`, `eslint`, `next build` clean (build applied the migration
-and compiled `/api/report`). A 24-case scratch suite covers moderation (leet,
-spaced letters, idempotency, the Scunthorpe guard), link grading, and SAS
-determinism. Live probes: 415 without JSON, 400 bad body/reason, 401 bad token.
+**Verified.** `tsc`, `eslint`, `next build` clean; live API probes (415/400/401) and a
+24-case scratch suite (moderation, links, SAS). The reactions + blur slice adds
+`tsc`/`eslint`/`next build`; both want a two-window browser check.
 
-**Next.** GIF/sticker search (provider + IP-leak note), background blur and ML
-noise cancellation (seam is `PeerSession.startVideo`), emoji reactions (needs wire
-message ids), and a `Report` retention prune.
+**Next.** GIF/sticker search (provider + IP-leak note), ML noise cancellation and
+a softer (portrait) blur mode, and a `Report` retention prune.

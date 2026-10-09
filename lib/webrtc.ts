@@ -1,4 +1,5 @@
 import { deriveSecureCode } from "@/lib/secure-code";
+import { BackgroundBlur } from "@/lib/background-blur";
 
 export type DescType = "offer" | "answer" | "ice";
 export type PeerControl =
@@ -16,18 +17,49 @@ const PEER_CONTROLS: readonly PeerControl[] = [
   "typing",
 ];
 
+// Reactions are a fixed whitelist, shared by the sender, the validator and the
+// UI so the three can't drift apart. Emoji never reach the profanity mask.
+export const REACTION_EMOJI = ["👍", "❤️", "😂", "😮", "😢", "🔥"] as const;
+export type ReactionEmoji = (typeof REACTION_EMOJI)[number];
+export type ReactionOp = "add" | "remove";
+export type Reaction = { me: boolean; them: boolean };
+export type ReactionMap = Partial<Record<ReactionEmoji, Reaction>>;
+
 // Wire format for the chat data channel. A discriminated union on `t` keeps the
 // send and receive halves in sync — a wrong tag is a compile error, not a
-// silently dropped message.
+// silently dropped message. `chat` carries a shared id so a peer can point a
+// reaction at a specific message.
 type WireMessage =
-  | { t: "chat"; text: string }
+  | { t: "chat"; id: string; text: string }
+  | { t: "react"; to: string; emoji: ReactionEmoji; op: ReactionOp }
   | { t: "ctrl"; ctrl: PeerControl };
+
+const WIRE_ID_MAX = 64;
+
+function isWireId(value: unknown): value is string {
+  return (
+    typeof value === "string" && value.length > 0 && value.length <= WIRE_ID_MAX
+  );
+}
 
 function parseWireMessage(data: unknown): WireMessage | null {
   if (typeof data !== "object" || data === null) return null;
   const msg = data as Record<string, unknown>;
-  if (msg.t === "chat" && typeof msg.text === "string") {
-    return { t: "chat", text: msg.text };
+  if (msg.t === "chat" && isWireId(msg.id) && typeof msg.text === "string") {
+    return { t: "chat", id: msg.id, text: msg.text };
+  }
+  if (
+    msg.t === "react" &&
+    isWireId(msg.to) &&
+    REACTION_EMOJI.includes(msg.emoji as ReactionEmoji) &&
+    (msg.op === "add" || msg.op === "remove")
+  ) {
+    return {
+      t: "react",
+      to: msg.to,
+      emoji: msg.emoji as ReactionEmoji,
+      op: msg.op,
+    };
   }
   if (msg.t === "ctrl" && PEER_CONTROLS.includes(msg.ctrl as PeerControl)) {
     return { t: "ctrl", ctrl: msg.ctrl as PeerControl };
@@ -37,7 +69,8 @@ function parseWireMessage(data: unknown): WireMessage | null {
 
 interface PeerCallbacks {
   onSignal: (type: DescType, payload: string) => void;
-  onChat: (text: string) => void;
+  onChat: (id: string, text: string) => void;
+  onReact: (to: string, emoji: ReactionEmoji, op: ReactionOp) => void;
   onControl: (ctrl: PeerControl) => void;
   onRemoteStream: (stream: MediaStream | null) => void;
   onConnectionState: (state: RTCPeerConnectionState) => void;
@@ -57,7 +90,10 @@ export class PeerSession {
   private readonly polite: boolean;
   private makingOffer = false;
   private ignoreOffer = false;
-  private localStream: MediaStream | null = null;
+  private rawStream: MediaStream | null = null;
+  private videoSender: RTCRtpSender | null = null;
+  private blur: BackgroundBlur | null = null;
+  private blurOn = false;
   private closed = false;
   private readonly cb: PeerCallbacks;
   private pendingCandidates: RTCIceCandidateInit[] = [];
@@ -116,7 +152,8 @@ export class PeerSession {
       }
       const msg = parseWireMessage(data);
       if (!msg) return;
-      if (msg.t === "chat") this.cb.onChat(msg.text);
+      if (msg.t === "chat") this.cb.onChat(msg.id, msg.text);
+      else if (msg.t === "react") this.cb.onReact(msg.to, msg.emoji, msg.op);
       else this.cb.onControl(msg.ctrl);
     };
   }
@@ -185,8 +222,12 @@ export class PeerSession {
     }
   }
 
-  sendChat(text: string) {
-    this.safeSend({ t: "chat", text });
+  sendChat(id: string, text: string) {
+    this.safeSend({ t: "chat", id, text });
+  }
+
+  sendReaction(to: string, emoji: ReactionEmoji, op: ReactionOp) {
+    this.safeSend({ t: "react", to, emoji, op });
   }
 
   sendControl(ctrl: PeerControl) {
@@ -200,21 +241,63 @@ export class PeerSession {
   }
 
   async startVideo(): Promise<MediaStream> {
-    if (!this.localStream) {
-      this.localStream = await navigator.mediaDevices.getUserMedia({
+    if (!this.rawStream) {
+      this.rawStream = await navigator.mediaDevices.getUserMedia({
         video: true,
         audio: true,
       });
-      for (const track of this.localStream.getTracks()) {
-        this.pc.addTrack(track, this.localStream);
+      for (const track of this.rawStream.getTracks()) {
+        const sender = this.pc.addTrack(track, this.rawStream);
+        if (track.kind === "video") this.videoSender = sender;
       }
     }
-    return this.localStream;
+    return this.publishedStream();
+  }
+
+  // Turn background blur on/off by swapping the video track the peer receives.
+  // Returns a fresh stream for the local self-view so it mirrors the effect.
+  async setBlur(on: boolean): Promise<MediaStream> {
+    if (on) {
+      if (!this.rawStream) throw new Error("no stream");
+      if (!this.blur) {
+        // Assign only once it has started, so a failure leaves `blur` null and
+        // the toggle can be retried from a clean state.
+        const blur = new BackgroundBlur();
+        await blur.start(this.rawStream);
+        this.blur = blur;
+      }
+      this.blurOn = true;
+    } else {
+      this.blurOn = false;
+    }
+    await this.videoSender?.replaceTrack(this.videoTrack());
+    return this.publishedStream();
+  }
+
+  // What the peer receives: the processed video track when blur is on, else the
+  // raw camera track, always paired with the raw microphone track.
+  private videoTrack(): MediaStreamTrack | null {
+    if (this.blurOn && this.blur?.track) return this.blur.track;
+    return this.rawStream?.getVideoTracks()[0] ?? null;
+  }
+
+  private publishedStream(): MediaStream {
+    const stream = new MediaStream();
+    const video = this.videoTrack();
+    if (video) stream.addTrack(video);
+    const audio = this.rawStream?.getAudioTracks()[0];
+    if (audio) stream.addTrack(audio);
+    return stream;
   }
 
   stopVideo() {
-    if (this.localStream) {
-      for (const track of this.localStream.getTracks()) track.stop();
+    if (this.blur) {
+      this.blur.stop();
+      this.blur = null;
+    }
+    this.blurOn = false;
+    if (this.rawStream) {
+      for (const track of this.rawStream.getTracks()) track.stop();
       for (const sender of this.pc.getSenders()) {
         if (sender.track) {
           try {
@@ -222,7 +305,8 @@ export class PeerSession {
           } catch {}
         }
       }
-      this.localStream = null;
+      this.rawStream = null;
+      this.videoSender = null;
     }
   }
 

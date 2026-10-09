@@ -42,6 +42,9 @@ yarn-error.log*
 next-env.d.ts
 .neon
 
+# generated at install time by scripts/setup-mediapipe.mjs (~19 MB of wasm)
+/public/mediapipe/
+
 # agent files
 .commandcode/
 .mcp.json

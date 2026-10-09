@@ -7,12 +7,18 @@ export default function VideoPanel({
   localStream,
   remoteStream,
   secureCode,
+  blurOn,
+  blurSupported,
+  onToggleBlur,
   onEnd,
   onRequestReport,
 }: {
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
   secureCode: string | null;
+  blurOn: boolean;
+  blurSupported: boolean;
+  onToggleBlur: () => void;
   onEnd: () => void;
   onRequestReport: () => void;
 }) {
@@ -71,6 +77,20 @@ export default function VideoPanel({
         >
           Report
         </button>
+        {blurSupported && (
+          <button
+            onClick={onToggleBlur}
+            aria-pressed={blurOn}
+            title="Blur the background the stranger sees"
+            className={`rounded-full border px-5 py-3 font-semibold transition-colors ${
+              blurOn
+                ? "border-signal bg-signal/15 text-fg"
+                : "border-line-strong text-fg-muted hover:border-fg-faint hover:text-fg"
+            }`}
+          >
+            {blurOn ? "Blur on" : "Blur"}
+          </button>
+        )}
         <button
           onClick={onEnd}
           className="rounded-full bg-danger px-8 py-3 font-semibold text-white transition-colors hover:bg-danger-hi"

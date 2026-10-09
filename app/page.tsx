@@ -8,7 +8,14 @@ import ChatPanel, { type ChatMessage } from "./components/ChatPanel";
 import VideoPanel from "./components/VideoPanel";
 import ReportPrompt from "./components/ReportPrompt";
 import { join, leave, poll, reportPeer, sendSignal } from "@/lib/api";
-import { PeerSession, type DescType, type PeerControl } from "@/lib/webrtc";
+import {
+  PeerSession,
+  type DescType,
+  type PeerControl,
+  type ReactionEmoji,
+  type ReactionMap,
+} from "@/lib/webrtc";
+import { supportsBackgroundBlur } from "@/lib/background-blur";
 import { POLL_INTERVAL_MS } from "@/lib/presence";
 import { censorText } from "@/lib/moderation";
 import { type PeerDot, type ReportReason, type SignalMsg } from "@/lib/types";
@@ -29,9 +36,14 @@ export default function Home() {
   const [sessionId] = useState(() => crypto.randomUUID());
   const [peers, setPeers] = useState<PeerDot[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [reactions, setReactions] = useState<Record<string, ReactionMap>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [blurOn, setBlurOn] = useState(false);
+  // Feature-detected once; the value only affects the video UI, which is never
+  // server-rendered, so the SSR `false` snapshot can't cause a hydration mismatch.
+  const [blurSupported] = useState(() => supportsBackgroundBlur());
   const [myLocation, setMyLocation] = useState<{ lat: number; lng: number } | null>(
     null,
   );
@@ -55,7 +67,6 @@ export default function Home() {
   const [reporting, setReporting] = useState(false);
 
   const peerRef = useRef<PeerSession | null>(null);
-  const msgId = useRef(0);
   // Peers we've reported this session — a report shouldn't be a formality, so
   // we refuse to reconnect with them while the tab lives.
   const reportedRef = useRef<Set<string>>(new Set());
@@ -68,11 +79,32 @@ export default function Home() {
     window.setTimeout(() => setNotice(null), 3500);
   }
 
-  function addMessage(mine: boolean, text: string) {
-    setMessages((prev) => [
-      ...prev,
-      { id: msgId.current++, mine, text, at: Date.now() },
-    ]);
+  function addMessage(mine: boolean, id: string, text: string) {
+    setMessages((prev) => [...prev, { id, mine, text, at: Date.now() }]);
+  }
+
+  // Reactions are keyed by message id on both sides: `me` is my own toggle,
+  // `them` is the stranger's, so a chip can show a count and highlight mine.
+  function setReaction(
+    id: string,
+    emoji: ReactionEmoji,
+    who: "me" | "them",
+    on: boolean,
+  ) {
+    setReactions((prev) => {
+      const current = prev[id]?.[emoji] ?? { me: false, them: false };
+      const next = { ...current, [who]: on };
+      const forMessage: ReactionMap = { ...(prev[id] ?? {}) };
+      if (next.me || next.them) forMessage[emoji] = next;
+      else delete forMessage[emoji];
+      return { ...prev, [id]: forMessage };
+    });
+  }
+
+  function toggleReaction(id: string, emoji: ReactionEmoji) {
+    const mine = reactions[id]?.[emoji]?.me ?? false;
+    setReaction(id, emoji, "me", !mine);
+    peerRef.current?.sendReaction(id, emoji, mine ? "remove" : "add");
   }
 
   // Typing is ephemeral: a keystroke refreshes it, and it clears itself when the
@@ -106,6 +138,8 @@ export default function Home() {
     setReporting(false);
     setVideo("none");
     setMessages([]);
+    setReactions({});
+    setBlurOn(false);
     setConn({ kind: "idle" });
     if (message) showNotice(message);
   }
@@ -115,10 +149,11 @@ export default function Home() {
       onSignal: (type: DescType, payload: string) => {
         void sendSignal(sessionId, peerId, type, payload);
       },
-      onChat: (text) => {
+      onChat: (id, text) => {
         stopPeerTyping();
-        addMessage(false, censorText(text).text);
+        addMessage(false, id, censorText(text).text);
       },
+      onReact: (to, emoji, op) => setReaction(to, emoji, "them", op === "add"),
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
       onSecureCode: (code) => setSecureCode(code),
@@ -164,6 +199,7 @@ export default function Home() {
         ps?.stopVideo();
         setLocalStream(null);
         setRemoteStream(null);
+        setBlurOn(false);
         setVideo("none");
         break;
       case "typing":
@@ -262,7 +298,23 @@ export default function Home() {
     ps?.sendControl("video-end");
     setLocalStream(null);
     setRemoteStream(null);
+    setBlurOn(false);
     setVideo("none");
+  }
+
+  function toggleBlur() {
+    const ps = peerRef.current;
+    if (!ps) return;
+    const next = !blurOn;
+    ps.setBlur(next)
+      .then((stream) => {
+        setBlurOn(next);
+        setLocalStream(stream);
+      })
+      .catch(() => {
+        setBlurOn(false);
+        showNotice("Background blur unavailable.");
+      });
   }
 
   function processSignal(sig: SignalMsg) {
@@ -422,6 +474,7 @@ export default function Home() {
       {inChat && (
         <ChatPanel
           messages={messages}
+          reactions={reactions}
           connected={connected}
           videoBusy={video !== "none"}
           peerId={chatPeerId}
@@ -429,9 +482,11 @@ export default function Home() {
           secureCode={secureCode}
           onSend={(text) => {
             const { text: safe } = censorText(text);
-            peerRef.current?.sendChat(safe);
-            addMessage(true, safe);
+            const id = crypto.randomUUID();
+            peerRef.current?.sendChat(id, safe);
+            addMessage(true, id, safe);
           }}
+          onReact={toggleReaction}
           onTyping={sendTyping}
           onStartVideo={startVideoRequest}
           onEnd={endConnection}
@@ -465,6 +520,9 @@ export default function Home() {
           localStream={localStream}
           remoteStream={remoteStream}
           secureCode={secureCode}
+          blurOn={blurOn}
+          blurSupported={blurSupported}
+          onToggleBlur={toggleBlur}
           onEnd={endVideo}
           onRequestReport={() => setReporting(true)}
         />
