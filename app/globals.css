@@ -1,79 +1,488 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
+/* ─────────────────────────────────────────────────────────────────────────
+   Pulse palette — dark only, on purpose. The product is the night side of a
+   planet; a light theme would fight the map. Values live as plain custom
+   properties so component CSS can read them, then get mapped into Tailwind's
+   namespace with `@theme inline` so utilities (bg-void, text-signal, ...)
+   resolve through the same source of truth.
+   ───────────────────────────────────────────────────────────────────────── */
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-void: var(--void);
+  --color-abyss: var(--abyss);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-faint: var(--fg-faint);
+  --color-signal: var(--signal);
+  --color-signal-hi: var(--signal-hi);
+  --color-signal-ink: var(--signal-ink);
+  --color-presence: var(--presence);
+  --color-danger: var(--danger);
+  --color-danger-hi: var(--danger-hi);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+
+  --radius-panel: 1.375rem;
+  --radius-field: 0.875rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  color-scheme: dark;
+
+  /* Canvas → surface ramp. Neutrals carry a whisper of the 258° space blue
+     so the greys feel related to the map instead of dead. */
+  --void: oklch(0.145 0.022 258);
+  --abyss: oklch(0.185 0.026 258);
+  --surface: oklch(0.225 0.028 258);
+  --surface-2: oklch(0.275 0.028 258);
+  --line: oklch(0.31 0.03 258);
+  --line-strong: oklch(0.42 0.035 258);
+
+  /* Text ramp. Body copy stays at L≥0.9 on these dark surfaces. */
+  --fg: oklch(0.97 0.008 258);
+  --fg-muted: oklch(0.8 0.02 258);
+  --fg-faint: oklch(0.72 0.02 258);
+
+  /* "Signal" — the warm beacon. The single warm hue in the whole UI, so warm
+     always reads as you/action. Strangers are cool points of light below. */
+  --signal: oklch(0.8 0.145 78);
+  --signal-hi: oklch(0.87 0.15 82);
+  --signal-ink: oklch(0.22 0.05 70);
+
+  /* "Presence" — cool cyan, reserved for live/online meaning. */
+  --presence: oklch(0.78 0.11 205);
+
+  --danger: oklch(0.63 0.2 22);
+  --danger-hi: oklch(0.7 0.19 24);
+
+  /* Translucent chrome + glows. */
+  --glass: oklch(0.2 0.026 258 / 0.72);
+  --glass-line: oklch(0.55 0.04 258 / 0.26);
+  --signal-glow: oklch(0.8 0.145 78 / 0.45);
+}
+
+@layer base {
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--void);
+    color: var(--fg);
+    font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: var(--signal);
+    color: var(--signal-ink);
+  }
+
+  /* One focus treatment for the whole app. Amber on the dark canvas clears
+     3:1 comfortably, and it is the same colour the eye learns for "action". */
+  :where(button, a, input, textarea, select, [tabindex]):focus-visible {
+    outline: 2px solid var(--signal);
+    outline-offset: 2px;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* ── Chrome ──────────────────────────────────────────────────────────── */
+  .panel-glass {
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(14px) saturate(1.2);
+    -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    border-radius: 9999px;
+    padding: 0.3125rem 0.6875rem;
+    font-size: 0.75rem;
+    line-height: 1.1;
+    letter-spacing: 0.01em;
+    color: var(--fg-muted);
+  }
+
+  .scroll-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--line-strong) transparent;
+  }
+  .scroll-slim::-webkit-scrollbar {
+    width: 8px;
+  }
+  .scroll-slim::-webkit-scrollbar-thumb {
+    background: var(--line-strong);
+    border-radius: 9999px;
+  }
+  .scroll-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  /* ── Brand beacon ────────────────────────────────────────────────────── */
+  .beacon {
+    position: relative;
+    display: inline-block;
+    width: var(--beacon-size, 3.5rem);
+    height: var(--beacon-size, 3.5rem);
+  }
+  .beacon--lg {
+    --beacon-size: clamp(4rem, 12vw, 5.5rem);
+  }
+  .beacon--sm {
+    --beacon-size: 1.5rem;
+  }
+
+  .beacon__core {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 26%;
+    height: 26%;
+    transform: translate(-50%, -50%);
+    border-radius: 9999px;
+    background: var(--signal);
+    box-shadow:
+      0 0 0 1px oklch(1 0 0 / 0.35),
+      0 0 14px 2px var(--signal-glow);
+  }
+
+  .beacon__ring {
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    border: 2px solid var(--signal);
+    opacity: 0;
+  }
+
+  .beacon:not(.beacon--static) .beacon__ring {
+    animation: beacon 2.7s cubic-bezier(0.2, 0, 0, 1) infinite;
+  }
+  .beacon__ring:nth-child(2) {
+    animation-delay: 0.9s;
+  }
+  .beacon__ring:nth-child(3) {
+    animation-delay: 1.8s;
+  }
+
+  .beacon--static .beacon__ring {
+    opacity: 0.4;
+  }
+  .beacon--static .beacon__ring:nth-child(2),
+  .beacon--static .beacon__ring:nth-child(3) {
+    display: none;
+  }
+
+  /* ── Entry backdrop ──────────────────────────────────────────────────── */
+  .starfield {
+    background-image:
+      radial-gradient(1.4px 1.4px at 18px 26px, oklch(1 0 0 / 0.85), transparent),
+      radial-gradient(1px 1px at 74px 58px, oklch(1 0 0 / 0.5), transparent),
+      radial-gradient(1.2px 1.2px at 120px 96px, oklch(0.85 0.04 240 / 0.7), transparent),
+      radial-gradient(1px 1px at 46px 132px, oklch(1 0 0 / 0.4), transparent);
+    background-size:
+      150px 150px,
+      170px 170px,
+      210px 210px,
+      130px 130px;
+    opacity: 0.55;
+    mask-image: radial-gradient(120% 100% at 50% 40%, #000 40%, transparent 92%);
+  }
+
+  .planet {
+    position: absolute;
+    left: 50%;
+    bottom: -46%;
+    width: min(135vw, 1180px);
+    aspect-ratio: 1;
+    transform: translateX(-50%);
+    border-radius: 9999px;
+    background: radial-gradient(
+      circle at 38% 22%,
+      oklch(0.36 0.06 252),
+      oklch(0.19 0.035 256) 46%,
+      oklch(0.1 0.02 258) 72%,
+      oklch(0.07 0.015 258)
+    );
+    box-shadow:
+      0 0 120px 8px oklch(0.5 0.09 220 / 0.28),
+      inset 0 0 120px 10px oklch(0.05 0.01 258 / 0.8);
+  }
+
+  /* Meridian sheen scrolls by exactly one pattern period, so the loop is
+     seamless and only `transform` is animated. */
+  .planet__sheen {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    overflow: hidden;
+    mask-image: radial-gradient(circle at 50% 42%, #000 58%, transparent 76%);
+  }
+  .planet__sheen::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -24%;
+    width: 148%;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0 26px,
+      oklch(0.78 0.06 235 / 0.07) 26px 27px
+    );
+    animation: planet-drift 90s linear infinite;
+  }
+
+  /* Atmospheric rim, lit along the top arc. */
+  .planet__rim {
+    position: absolute;
+    inset: -2px;
+    border-radius: inherit;
+    background: radial-gradient(
+      circle at 50% 50%,
+      transparent 63%,
+      oklch(0.72 0.12 210 / 0.34) 70%,
+      transparent 77%
+    );
+  }
+
+  .entry-vignette {
+    background: radial-gradient(
+      90% 70% at 50% 34%,
+      oklch(0.145 0.022 258 / 0.86) 0%,
+      oklch(0.145 0.022 258 / 0.4) 46%,
+      transparent 78%
+    );
+  }
+
+  /* ── Staged entrance ─────────────────────────────────────────────────── */
+  .rise {
+    animation: rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  /* ── Map markers ─────────────────────────────────────────────────────── */
+  .pulse-dot {
+    position: relative;
+    width: 15px;
+    height: 15px;
+    padding: 0;
+    border-radius: 9999px;
+    border: 2px solid oklch(1 0 0 / 0.92);
+    background: var(--dot, var(--presence));
+    cursor: pointer;
+    transition: transform 0.15s cubic-bezier(0.2, 0, 0, 1);
+  }
+
+  /* Soft halo marks the dot as a light source against the map. */
+  .pulse-dot::before {
+    content: "";
+    position: absolute;
+    inset: -7px;
+    border-radius: 9999px;
+    background: radial-gradient(circle, var(--dot-glow, oklch(0.78 0.11 205 / 0.35)), transparent 70%);
+    pointer-events: none;
+  }
+
+  /* Sonar ring communicates "alive" without relying on colour. */
+  .pulse-dot::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 9999px;
+    border: 2px solid var(--dot, var(--presence));
+    animation: sonar 2.6s ease-out infinite;
+    pointer-events: none;
+  }
+
+  .pulse-dot:hover,
+  .pulse-dot:focus-visible {
+    transform: scale(1.35);
+    z-index: 2;
+  }
+
+  /* Busy peers go hollow — a shape change, so the state survives greyscale. */
+  .pulse-dot.is-busy {
+    background: transparent;
+    border-style: dashed;
+    opacity: 0.65;
+  }
+  .pulse-dot.is-busy::after {
+    animation: none;
+    opacity: 0.2;
+  }
+
+  .pulse-dot__label {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%) translateY(3px);
+    padding: 0.1875rem 0.5rem;
+    border-radius: 9999px;
+    background: var(--glass);
+    border: 1px solid var(--glass-line);
+    backdrop-filter: blur(8px);
+    color: var(--fg);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+  }
+  .pulse-dot:hover .pulse-dot__label,
+  .pulse-dot:focus-visible .pulse-dot__label {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* The user's own location — warm, because warm means "you". */
+  .pulse-me {
+    position: relative;
+    display: block;
+  }
+  .pulse-me__core {
+    display: block;
+    width: 16px;
+    height: 16px;
+    border-radius: 9999px;
+    background: var(--signal);
+    border: 2px solid oklch(1 0 0 / 0.95);
+    box-shadow:
+      0 0 0 5px var(--signal-glow),
+      0 0 18px 3px var(--signal-glow);
+  }
+  .pulse-me__label {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 0.1875rem 0.5rem;
+    border-radius: 9999px;
+    background: var(--signal);
+    color: var(--signal-ink);
+    font-size: 0.625rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  /* ── Chat ────────────────────────────────────────────────────────────── */
+  /* A stranger's avatar is the same point of light as their dot on the globe:
+     a lit orb shaded from the shared --dot hue, not a flat swatch. */
+  .peer-avatar {
+    background: radial-gradient(
+      circle at 34% 28%,
+      color-mix(in oklab, var(--dot) 62%, white),
+      var(--dot) 64%
+    );
+    box-shadow:
+      inset 0 0 4px oklch(1 0 0 / 0.35),
+      0 0 14px 0 var(--dot-glow, transparent);
+  }
+
+  .bubble-in {
+    animation: bubble-in 0.28s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+
+  .typing-dot {
+    animation: typing-bounce 1.15s ease-in-out infinite;
+  }
+  .typing-dot:nth-child(2) {
+    animation-delay: 0.15s;
+  }
+  .typing-dot:nth-child(3) {
+    animation-delay: 0.3s;
+  }
 }
 
-/* Live user dots on the map */
-.pulse-dot {
-  width: 14px;
-  height: 14px;
-  border-radius: 9999px;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  cursor: pointer;
-  padding: 0;
-  box-shadow: 0 0 0 rgba(255, 255, 255, 0.5);
-  animation: pulse-ring 2s ease-out infinite;
-  transition: transform 0.1s ease;
-}
-
-.pulse-dot:hover {
-  transform: scale(1.3);
-}
-
-/* The user's own "you are here" pin — small, sized like the dots. */
-.pulse-me {
-  position: relative;
-  font-size: 18px;
-  line-height: 1;
-  cursor: default;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
-}
-
-.pulse-me-label {
-  position: absolute;
-  bottom: 100%;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-bottom: 1px;
-  font-size: 10px;
-  font-weight: 700;
-  color: #ffffff;
-  background: rgba(0, 0, 0, 0.6);
-  padding: 0 5px;
-  border-radius: 9999px;
-  white-space: nowrap;
-}
-
-@keyframes pulse-ring {
+@keyframes beacon {
   0% {
-    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.4);
+    transform: scale(0.35);
+    opacity: 0.85;
   }
-  70% {
-    box-shadow: 0 0 0 8px rgba(255, 255, 255, 0);
-  }
+  70%,
   100% {
-    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0);
+    transform: scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes sonar {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.7;
+  }
+  70%,
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@keyframes planet-drift {
+  to {
+    transform: translateX(27px);
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
+}
+
+/* Global reduced-motion kill switch. Uses 0.01ms rather than `none` so
+   transitionend/animationend still fire and nothing waiting on them hangs. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

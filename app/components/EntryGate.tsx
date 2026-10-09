@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Beacon from "./Beacon";
 
 export default function EntryGate({
   onReady,
@@ -13,18 +14,19 @@ export default function EntryGate({
   function enter() {
     if (!("geolocation" in navigator)) {
       setStatus("error");
-      setError("Your browser doesn't support location access.");
+      setError("This browser can't share a location, so there's no dot to place.");
       return;
     }
     setStatus("locating");
+    setError("");
     navigator.geolocation.getCurrentPosition(
       (pos) => onReady(pos.coords.latitude, pos.coords.longitude),
       (err) => {
         setStatus("error");
         setError(
           err.code === err.PERMISSION_DENIED
-            ? "Location permission is required to place you on the map."
-            : "Couldn't get your location. Please try again.",
+            ? "Pulse needs your location to place your dot. Allow access and try again."
+            : "Couldn't find you this time. Give it another go.",
         );
       },
       // High accuracy + maximumAge:0 forces a fresh fix (Wi-Fi/GPS scan)
@@ -34,30 +36,67 @@ export default function EntryGate({
   }
 
   return (
-    <div className="flex min-h-full flex-1 flex-col items-center justify-center gap-8 bg-zinc-950 p-6 text-zinc-100">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold tracking-tight">Pulse</h1>
-        <p className="mt-2 max-w-sm text-zinc-400">
-          A living globe of anonymous strangers. Drop onto the map and connect.
+    <div className="relative flex min-h-dvh flex-1 flex-col items-center justify-center overflow-hidden px-6 py-9">
+      {/* Background plane: deep space, a night-side planet, and a vignette
+          that keeps the type legible. Decorative, so it is hidden from AT. */}
+      <div className="starfield pointer-events-none absolute inset-0" aria-hidden="true" />
+      <div className="planet pointer-events-none" aria-hidden="true">
+        <span className="planet__sheen" />
+        <span className="planet__rim" />
+      </div>
+      <div className="entry-vignette pointer-events-none absolute inset-0" aria-hidden="true" />
+
+      {/* Content plane */}
+      <div className="relative z-10 flex w-full max-w-md flex-col items-center gap-9 text-center">
+        <div
+          className="rise flex flex-col items-center gap-6"
+          style={{ animationDelay: "60ms" }}
+        >
+          <Beacon size="lg" />
+          <h1 className="text-balance text-5xl font-semibold tracking-[-0.045em] sm:text-6xl">
+            Pulse
+          </h1>
+        </div>
+
+        <p
+          className="rise text-pretty text-base leading-relaxed text-fg-muted sm:text-lg"
+          style={{ animationDelay: "170ms" }}
+        >
+          Every dot is a stranger, online right now. Drop in, tap one, say hello.
+        </p>
+
+        <div
+          className="rise flex w-full flex-col items-center gap-5"
+          style={{ animationDelay: "280ms" }}
+        >
+          <button
+            onClick={enter}
+            disabled={status === "locating"}
+            className="inline-flex items-center gap-2.5 rounded-full bg-signal px-7 py-3.5 text-base font-semibold text-signal-ink shadow-[0_12px_44px_-14px_var(--signal-glow)] transition duration-150 hover:bg-signal-hi active:scale-[0.98] disabled:cursor-progress disabled:opacity-70"
+          >
+            {status === "locating" && (
+              <span
+                aria-hidden="true"
+                className="h-4 w-4 animate-spin rounded-full border-2 border-signal-ink/30 border-t-signal-ink"
+              />
+            )}
+            {status === "locating" ? "Finding you…" : "Drop onto the map"}
+          </button>
+
+          <p className="max-w-[40ch] text-pretty text-xs leading-relaxed text-fg-faint">
+            No sign-up. Your dot lands 1–3&nbsp;km from your real location, and
+            nothing is stored. Close the tab and you&rsquo;re gone.
+          </p>
+        </div>
+
+        <p
+          role="status"
+          aria-live="polite"
+          className="min-h-5 max-w-[40ch] text-sm text-danger"
+        >
+          {status === "error" ? error : ""}
         </p>
       </div>
-
-      <button
-        onClick={enter}
-        disabled={status === "locating"}
-        className="rounded-full bg-emerald-400 px-8 py-3 font-semibold text-zinc-950 transition hover:bg-emerald-300 disabled:opacity-60"
-      >
-        {status === "locating" ? "Locating…" : "Enter Pulse"}
-      </button>
-
-      {status === "error" && (
-        <p className="max-w-sm text-center text-sm text-red-400">{error}</p>
-      )}
-
-      <p className="max-w-sm text-center text-xs text-zinc-500">
-        No sign-up. Your dot is placed 1–3&nbsp;km from your real location.
-        Nothing is stored — closing the tab ends everything.
-      </p>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
@@ -17,6 +17,14 @@ export const metadata: Metadata = {
   description: "A living globe of anonymous strangers. Tap a dot, start talking.",
 };
 
+export const viewport: Viewport = {
+  themeColor: "#0b0f1a",
+  colorScheme: "dark",
+  // Draw under the notch/home indicator; chrome pads itself with
+  // env(safe-area-inset-*) where it touches an edge.
+  viewportFit: "cover",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -27,7 +35,9 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="flex min-h-full flex-col bg-void text-fg">
+        {children}
+      </body>
     </html>
   );
 }

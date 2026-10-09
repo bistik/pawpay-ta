@@ -27,33 +27,37 @@ export default function VideoPanel({
   }, [remoteStream]);
 
   return (
-    <div className="absolute inset-0 z-30 flex flex-col bg-black">
+    <div className="absolute inset-0 z-30 flex flex-col bg-void">
       <div className="relative flex-1">
         {/* Remote (full screen) */}
         <video
           ref={remoteRef}
           autoPlay
           playsInline
-          className="h-full w-full bg-zinc-900 object-cover"
+          aria-label="Stranger's video"
+          className="h-full w-full bg-abyss object-cover"
         />
         {!remoteStream && (
-          <div className="absolute inset-0 flex items-center justify-center text-zinc-500">
-            Waiting for stranger&rsquo;s video…
+          <div className="absolute inset-0 flex items-center justify-center">
+            <p className="animate-pulse text-sm text-fg-faint">
+              Waiting for the stranger&rsquo;s video…
+            </p>
           </div>
         )}
-        {/* Local (picture-in-picture) */}
+        {/* Local (picture-in-picture), mirrored like a self-view. */}
         <video
           ref={localRef}
           autoPlay
           playsInline
           muted
-          className="absolute bottom-4 right-4 h-40 w-28 rounded-lg border border-zinc-700 bg-zinc-800 object-cover"
+          aria-label="Your video"
+          className="absolute bottom-[calc(env(safe-area-inset-bottom)+1rem)] right-4 h-40 w-28 -scale-x-100 rounded-xl border border-line-strong bg-surface object-cover shadow-xl"
         />
       </div>
-      <div className="flex justify-center bg-zinc-950 p-4">
+      <div className="flex justify-center px-4 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
         <button
           onClick={onEnd}
-          className="rounded-full bg-red-500 px-8 py-3 font-semibold text-white hover:bg-red-400"
+          className="rounded-full bg-danger px-8 py-3 font-semibold text-white transition-colors hover:bg-danger-hi"
         >
           End video
         </button>

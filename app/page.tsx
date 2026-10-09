@@ -48,9 +48,13 @@ export default function Home() {
     _setVideo(v);
   };
 
+  const [peerTyping, setPeerTyping] = useState(false);
+
   const peerRef = useRef<PeerSession | null>(null);
   const msgId = useRef(0);
   const requestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const typingClearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTypingSent = useRef(0);
 
   function showNotice(text: string) {
     setNotice(text);
@@ -58,11 +62,35 @@ export default function Home() {
   }
 
   function addMessage(mine: boolean, text: string) {
-    setMessages((prev) => [...prev, { id: msgId.current++, mine, text }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: msgId.current++, mine, text, at: Date.now() },
+    ]);
+  }
+
+  // Typing is ephemeral: a keystroke refreshes it, and it clears itself when the
+  // stranger stops. A delivered message clears it immediately.
+  function markPeerTyping() {
+    setPeerTyping(true);
+    if (typingClearTimer.current) clearTimeout(typingClearTimer.current);
+    typingClearTimer.current = setTimeout(() => setPeerTyping(false), 3000);
+  }
+
+  function stopPeerTyping() {
+    if (typingClearTimer.current) clearTimeout(typingClearTimer.current);
+    setPeerTyping(false);
+  }
+
+  function sendTyping() {
+    const now = Date.now();
+    if (now - lastTypingSent.current < 1200) return;
+    lastTypingSent.current = now;
+    peerRef.current?.sendControl("typing");
   }
 
   function teardown(message?: string) {
     if (requestTimer.current) clearTimeout(requestTimer.current);
+    stopPeerTyping();
     peerRef.current?.close();
     peerRef.current = null;
     setLocalStream(null);
@@ -78,7 +106,10 @@ export default function Home() {
       onSignal: (type: DescType, payload: string) => {
         void sendSignal(sessionId, peerId, type, payload);
       },
-      onChat: (text) => addMessage(false, text),
+      onChat: (text) => {
+        stopPeerTyping();
+        addMessage(false, text);
+      },
       onControl: (ctrl) => handleControl(ctrl),
       onRemoteStream: (stream) => setRemoteStream(stream),
       onConnectionState: (state) => {
@@ -124,6 +155,9 @@ export default function Home() {
         setLocalStream(null);
         setRemoteStream(null);
         setVideo("none");
+        break;
+      case "typing":
+        markPeerTyping();
         break;
     }
   }
@@ -314,6 +348,9 @@ export default function Home() {
   }
 
   const inChat = conn.kind === "connecting" || conn.kind === "connected";
+  const connected = conn.kind === "connected";
+  const chatPeerId =
+    conn.kind === "connecting" || conn.kind === "connected" ? conn.peerId : null;
 
   return (
     <main className="fixed inset-0 overflow-hidden">
@@ -325,17 +362,21 @@ export default function Home() {
       />
 
       {notice && (
-        <div className="absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
+        <div
+          role="status"
+          aria-live="polite"
+          className="panel-glass absolute left-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] z-30 -translate-x-1/2 rounded-full px-4 py-2 text-sm text-fg shadow-lg"
+        >
           {notice}
         </div>
       )}
 
       {conn.kind === "requesting" && (
-        <div className="absolute left-1/2 top-20 z-30 flex -translate-x-1/2 items-center gap-3 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
-          <span>Requesting connection…</span>
+        <div className="panel-glass absolute left-1/2 top-[calc(env(safe-area-inset-top)+4.5rem)] z-30 flex -translate-x-1/2 items-center gap-3 rounded-full py-1.5 pl-4 pr-1.5 text-sm text-fg shadow-lg">
+          <span className="whitespace-nowrap">Requesting connection…</span>
           <button
             onClick={cancelRequest}
-            className="rounded-full bg-zinc-700 px-3 py-1 text-xs hover:bg-zinc-600"
+            className="rounded-full bg-surface-2 px-3 py-1 text-xs font-medium text-fg-muted transition-colors hover:bg-line-strong hover:text-fg"
           >
             Cancel
           </button>
@@ -355,19 +396,26 @@ export default function Home() {
       {inChat && (
         <ChatPanel
           messages={messages}
-          connected={conn.kind === "connected"}
+          connected={connected}
           videoBusy={video !== "none"}
+          peerId={chatPeerId}
+          peerTyping={peerTyping}
           onSend={(text) => {
             peerRef.current?.sendChat(text);
             addMessage(true, text);
           }}
+          onTyping={sendTyping}
           onStartVideo={startVideoRequest}
           onEnd={endConnection}
         />
       )}
 
       {video === "requesting" && (
-        <div className="absolute bottom-24 left-1/2 z-30 -translate-x-1/2 rounded-full bg-zinc-800/90 px-4 py-2 text-sm text-zinc-100 shadow-lg backdrop-blur">
+        <div
+          role="status"
+          aria-live="polite"
+          className="panel-glass absolute bottom-[calc(env(safe-area-inset-bottom)+6rem)] left-1/2 z-30 -translate-x-1/2 whitespace-nowrap rounded-full px-4 py-2 text-sm text-fg shadow-lg"
+        >
           Waiting for stranger to accept video…
         </div>
       )}

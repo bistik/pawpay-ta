@@ -2,137 +2,107 @@
 
 ## Phase 1 — Make it run
 
-Found three bugs by tracing the full connect → negotiate → chat/end flow, plus
-local/Neon env wiring.
+Traced the full connect → negotiate → chat/end flow. Four bugs, plus env wiring.
 
-**Chat never arrived on the other side**
-- Symptom: after two peers connected, messages sent from one side never appeared
-  for the other.
-- Cause: the data channel was asymmetric. In `lib/webrtc.ts`, `sendChat` tagged
-  outgoing frames `{ t: "msg" }`, but the receive handler only matched
-  `t === "chat"`. Every chat frame fell through the `else if` and was swallowed
-  by the empty `catch`.
-- Fix: gave the wire format a `WireMessage` discriminated union plus a
-  `parseWireMessage` validator. `sendChat` now sends `{ t: "chat" }`, and
-  `safeSend(msg: WireMessage)` makes a wrong tag a compile error instead of a
-  silent drop. Send and receive now share one type, so they can't drift.
-
-**Stale dots stayed online**
-- Symptom: after everyone closed the app, dots lingered on the map for ages.
-- Cause: the poll heartbeat used `updateMany({ where: {} })`, refreshing
-  `lastSeen` for *every* user on every poll, so the staleness reaper never caught
-  anyone.
-- Fix: scoped the heartbeat to `where: { id }` in `app/api/poll/route.ts`.
-
-**A user stayed "busy" after hanging up**
-- Symptom: after ending a call, a user could not be re-connected.
-- Cause: `app/api/signal/route.ts` cleared the `busy` flag on `decline` but not on
-  `end`, so the hung-up peer was left marked busy.
-- Fix: treat `end` like `decline` — free both peers.
-
-**ICE candidates dropped**
-- Cause: candidates arriving while the remote description was still being applied
-  (same poll batch as the offer/answer) had no flush after
-  `setRemoteDescription`.
-- Fix: flush the pending-candidate queue again after setting the remote
-  description.
-
-**Env / tooling**
-- Added `@neon/config` + `@neon/env`, `neon.ts`, `.mcp.json`, a `.gitignore` entry
-  for `.neon`, and a `postinstall: prisma generate`.
+- **Chat never arrived.** `sendChat` tagged frames `{ t: "msg" }`, but the receiver
+  only matched `t === "chat"`, so every frame fell through an empty `catch`. Gave the
+  wire format a `WireMessage` discriminated union + `parseWireMessage`;
+  `safeSend(msg: WireMessage)` makes a wrong tag a compile error, so send and receive
+  can't drift apart.
+- **Dots stayed online.** The poll heartbeat ran `updateMany({ where: {} })`, refreshing
+  `lastSeen` for *every* user, so the reaper never caught anyone. Scoped it to
+  `where: { id }` (`app/api/poll/route.ts`).
+- **Stuck "busy" after hang-up.** `signal` cleared `busy` on `decline` but not `end`.
+  `end` now frees both peers.
+- **Dropped ICE candidates.** Candidates buffered while the remote description was
+  being applied were never flushed. Flush again after `setRemoteDescription`.
+- **Env/tooling.** `@neon/config` + `@neon/env`, `neon.ts`, `.mcp.json`, `.neon`
+  gitignored, `postinstall: prisma generate`.
 
 ## Phase 2 — Make it good
 
-TBD.
+Two slices: globe + brand system first (so nothing got restyled twice), then chat feel.
+
+**Direction.** The concept is *Earth at night*: a dark sphere with a cool rim,
+strangers as cool points of light, and one warm amber "beacon" for anything meaning
+you/action. Warm vs cool is load-bearing — stranger hues are clamped to a 168–288°
+band, so the accent can never be confused with a peer. Dark-only on purpose; a light
+theme would fight the map.
+
+- **Tokens** (`app/globals.css`): colour defined in OKLCH as semantic roles, mapped
+  into Tailwind v4 via `@theme inline`, so utilities and component CSS share one
+  source of truth. Fixed a real bug: `body` was forced to `Arial`, so **Geist was
+  downloaded and never used**. Added one `:focus-visible` treatment and a global
+  `prefers-reduced-motion` switch (`0.01ms`, so `transitionend` still fires).
+- **Globe** (`WorldMap`): `projection: "globe"` + `setFog` atmosphere against deep
+  space and stars, instead of a flat map; a ~0.9°/s idle spin that pauses on any
+  gesture and is off under reduced-motion. Markers get cool hues, a halo, a sonar ring
+  and a hover label; **busy is now a hollow, dashed shape** rather than 35% opacity, so
+  it survives greyscale. Replaced the OS-inconsistent 📍 pin with a warm beacon. Fixed
+  a dead `!TOKEN` fallback (`?? "pk…"` meant a missing token silently rendered a broken
+  map).
+- **Brand** (`Beacon`, `EntryGate`): a pulse-beacon mark drives the hero — mark,
+  wordmark, one promise line, one dominant action, privacy as a trust line — over a
+  starfield and night-side planet, with a staggered entrance.
+- **Chat feel.** One hue per stranger (`lib/peer-color.ts`) drives both the map dot and
+  the chat avatar (a shaded "point of light"). `typing` joins the `PeerControl` union —
+  throttled to 1 send per 1.2 s, self-clearing after 3 s, announced once. Messages group
+  with a single timestamp per run; the view auto-follows only when you're already at the
+  bottom, otherwise a "N new messages" pill appears. On phones the chat is a bottom
+  sheet with a handle to peek at the map.
+- **Rode along:** prompts are real dialogs (focus moved in, Tab trapped, Esc, focus
+  restored); status pills are `aria-live` and the message list is a `role="log"`; the
+  chat input is 16 px on mobile so **iOS stops auto-zooming**; chrome respects
+  `env(safe-area-inset-*)`; self-view video is mirrored.
+
+**Verified:** `tsc`, `eslint`, `next build` clean. Rendered the entry at 320/390/1280
+and the live globe via headless Chrome (CDP + faked geolocation); the chat was
+render-checked mid-slice.
+
+**Deferred:** video mute/flip/quality controls, marker clustering, sound/haptics.
 
 ## Phase 3 — Make it secure
 
-Review of the four coordination endpoints (`join`, `signal`, `poll`, `leave`):
-surface-level input handling first, then the structural issues. Fixed the
-critical + high findings; medium and below are noted at the end.
+Reviewed `join`/`signal`/`poll`/`leave`. Fixed critical + high; the rest are noted.
 
-**Fixed — typed + validated request bodies (zod)**
+- **Validated bodies (zod).** `lib/schemas.ts` is the single source of truth; every
+  route validates before Prisma. `join`: UUID + in-range coords (still offset, never
+  stored raw). `signal`: UUIDs, constrained `type`, 64 KB payload cap, and a tight
+  contract — `offer`/`answer`/`ice` require a payload, control signals must not carry
+  one (which also fixed a client `JSON.parse("")` crash). Bodies are `strictObject`;
+  `SIGNAL_TYPES` is one `as const` tuple feeding both the union and the zod enum.
+- **Session-token auth (critical).** The id was both the public handle *and* the only
+  credential, and `poll` hands out every id — so any peer could drain another's
+  mailbox, forge signals as them, or `leave` them. `join` now mints a 256-bit token
+  (`lib/auth.ts`, on `Presence.token`, returned once) that `signal`/`poll`/`leave`
+  verify constant-time. `join` refuses to re-issue a live id's token (409), which is why
+  a stateless HMAC-over-id token wouldn't have worked here. Still anonymous: no account,
+  no PII, the token just isn't published. Sent in `x-session-token`; `leave` carries it
+  in the body since `sendBeacon` can't set headers.
+- **Rate limiting (high).** Postgres fixed-window counters (`lib/rate-limit.ts` +
+  `RateLimit` table), shared across serverless instances. Per-IP everywhere (shielding
+  the pre-auth token lookup) plus per-session on `signal`/`poll`/`leave`; 429 +
+  `Retry-After`.
+- **Busy-flag DoS (high).** Auth wasn't enough — any user could `accept` a stranger and
+  mark them busy. `accept` now requires a real pending `request` within the signal TTL,
+  so `poll` stamps `deliveredAt` instead of deleting.
 
-`lib/schemas.ts` is the single source of truth; every route validates before
-touching Prisma.
+Schema lives in a migration the build applies via `prisma migrate deploy` (using
+`DATABASE_URL_UNPOOLED`, since PgBouncer can't hold its locks; the runtime keeps the
+pooled `DATABASE_URL`). Prod's Neon branch was empty, so the first deploy created the
+schema from scratch; Vercel holds `DATABASE_URL`, `DATABASE_URL_UNPOOLED` and
+`NEXT_PUBLIC_MAPBOX_TOKEN`. The build runs on every deploy, so scope `migrate deploy` to
+production if previews ever share the prod DB.
 
-- `join`: UUID `id`, finite in-range `lat`/`lng` (raw coords still
-  privacy-offset and never stored).
-- `signal`: UUID ids, `type` constrained, 64 KB `payload` cap — and the wire
-  contract is tight: `offer`/`answer`/`ice` **require** a payload, the control
-  signals must not carry one (this also fixed the client crash on
-  `JSON.parse("")`).
-- `poll`/`leave`: same UUID check.
-- All bodies are `strictObject` (unknown keys rejected). `SIGNAL_TYPES` is one
-  `as const` tuple; the `SignalType` union and the zod enum both derive from it.
-- `parseJsonBody` (`lib/api-body.ts`) rejects non-`application/json` (415) and
-  returns a consistent 400 with the zod issues.
+**Noted, not fixed.** Mailbox flooding (no per-recipient cap); only `request` checks the
+peer exists; `/api/leave` has no `Origin`/`Sec-Fetch-Site` check (low); `end`/`decline`
+can free a peer you aren't connected to (low); `npm audit` flags a critical Next.js
+advisory plus highs in `sharp`/`postcss`/`nanoid`/`fast-uri` (medium); no security
+headers (low); session id still in the `poll` query string (low).
 
-**Fixed — session-token authentication (critical)**
-
-- The flaw: the session id was both the public handle *and* the only
-  credential, and `poll` hands every peer's id out — so anyone could drain a
-  victim's mailbox (reading/deleting their signaling), forge signals as them, or
-  `leave` them.
-- Now `join` mints a random 256-bit token (`lib/auth.ts`), stored on
-  `Presence.token` and returned once; `signal`/`poll`/`leave` verify it
-  (constant-time) against the claimed id. `join` refuses to re-issue a live id's
-  token (409), so the token can't be taken by joining as the victim — which is
-  why a stateless HMAC-over-id token would not have worked here. Still
-  anonymous: no account, no PII, the token simply isn't published.
-- Token travels in `x-session-token` for `signal`/`poll`; `leave` carries it in
-  the body because `sendBeacon` cannot set headers. `lib/api.ts` holds it and
-  re-joins once if the server reaped an idle session.
-
-**Fixed — rate limiting (high)**
-
-- Postgres fixed-window counters (`lib/rate-limit.ts` + `RateLimit` table) —
-  shared across serverless instances, unlike an in-process map.
-- Per-IP on every endpoint (shields the pre-auth token lookup), plus
-  per-authenticated-session on `signal`/`poll`/`leave`. Returns 429 with
-  `Retry-After`; old windows pruned in `poll`.
-
-**Fixed — busy-flag / connection DoS (high)**
-
-- Auth alone wasn't enough: any authenticated user could still `accept` to a
-  stranger and mark them busy. `accept` now requires a real pending `request`
-  from the target within the signal TTL — so `poll` marks signals `deliveredAt`
-  instead of deleting them, letting the request survive delivery for that check.
-
-Schema changes are captured in a migration
-(`prisma/migrations/20261008143042_add_session_tokens_and_rate_limit`) and
-applied with `prisma migrate deploy`, which the build now runs. Migrate uses
-`DATABASE_URL_UNPOOLED` (PgBouncer can't hold its locks); the app runtime keeps
-the pooled `DATABASE_URL` (`lib/prisma.ts`).
-
-**Production rollout (next session).** The existing prod DB predates migrations,
-so baseline it once against the prod direct URL —
-`npx prisma migrate resolve --applied 20260608183826_initialized` — then deploy;
-the Vercel build's `migrate deploy` applies the token/RateLimit migration. Set
-`DATABASE_URL_UNPOOLED` in the Vercel project env. Note the build runs on every
-deploy, so if preview deployments share the prod database, scope `migrate
-deploy` to the production environment.
-
-**Noted, not fixed (medium and below)**
-
-- Mailbox flooding: no cap on pending signals per recipient within the TTL.
-- Signals to nonexistent peers: only `request` checks the target exists.
-- CSRF on `/api/leave`: needs a valid token now, but `Origin`/`Sec-Fetch-Site`
-  isn't checked. (Low.)
-- `end`/`decline` can free a peer the caller isn't connected to — but only
-  within `[self, one victim]`, so low impact. (Low.)
-- Dependency audit: `npm audit` flags a critical Next.js advisory plus highs in
-  `sharp`/`postcss`/`nanoid`/`fast-uri`. (Medium.)
-- No security headers (CSP, `X-Content-Type-Options`, `Referrer-Policy`,
-  HSTS). (Low.)
-- Session id still in the `poll` query string. (Low.)
-
-Verified with tsc, eslint, `next build`, and live tests: 401 without/with a
-wrong token, 409 on id reuse and on an `accept` with no pending request, the
-full join → request → accept → busy flow, and 150 polls allowed with the rest
-429.
-
-
+Verified with tsc, eslint, `next build` and live tests: 401 without/with a wrong token,
+409 on id reuse and on `accept` with no pending request, the full join → request →
+accept → busy flow, and 150 polls allowed before 429.
 
 ## Phase 4 — Make it better
 

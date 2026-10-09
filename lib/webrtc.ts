@@ -3,13 +3,15 @@ export type PeerControl =
   | "video-request"
   | "video-accept"
   | "video-decline"
-  | "video-end";
+  | "video-end"
+  | "typing";
 
 const PEER_CONTROLS: readonly PeerControl[] = [
   "video-request",
   "video-accept",
   "video-decline",
   "video-end",
+  "typing",
 ];
 
 // Wire format for the chat data channel. A discriminated union on `t` keeps the
